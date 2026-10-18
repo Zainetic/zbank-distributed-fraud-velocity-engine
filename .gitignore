@@ -1,7 +1,15 @@
+# Build output
+target/
 /target/
 
-# Eclipse Core      
+# Eclipse
+.settings/
 .project
-
-# JDT-specific (Eclipse Java Development Tools)     
 .classpath
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Environment variables and secrets
+.env

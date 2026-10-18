@@ -1,4 +1,3 @@
-
 services:
   redis-cache:
     image: redis:7.2-alpine
@@ -13,9 +12,9 @@ services:
     image: postgres:16-alpine
     container_name: zbank-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password 
-      POSTGRES_DB: zbank_fraud
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-zbank_fraud}
     ports:
       - "5433:5432"
     networks:
@@ -24,37 +23,37 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   kafka:
-      image: apache/kafka:3.7.0
-      container_name: zbank-kafka
-      ports:
-        - "9092:9092"
-      environment:
-        KAFKA_NODE_ID: 1
-        KAFKA_PROCESS_ROLES: broker,controller
-        KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-        KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-        KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-        KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-        KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-        KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-        KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-        KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      networks:
-        - zbank-network
+    image: apache/kafka:3.7.0
+    container_name: zbank-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - zbank-network
 
   pgadmin:
-      image: dpage/pgadmin4
-      container_name: zbank-pgadmin
-      environment:
-        PGADMIN_DEFAULT_EMAIL: admin@zbank.com
-        PGADMIN_DEFAULT_PASSWORD: admin
-      ports:
-        - "5050:80"
-      networks:
-        - zbank-network
-      depends_on:
-        - postgres-db
+    image: dpage/pgadmin4
+    container_name: zbank-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@zbank.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    networks:
+      - zbank-network
+    depends_on:
+      - postgres-db
 
 networks:
   zbank-network:

@@ -50,7 +50,13 @@ The entire infrastructure is containerized and managed via Docker Compose.
 
 **1. Initialize the Infrastructure**
 
-Ensure Docker is running, then execute the following command in the project root to spin up PostgreSQL, Redis, Apache Kafka, and pgAdmin:
+Ensure Docker is running. Safe local demo defaults are provided in `docker-compose.yml` and `.env.example`. You can optionally copy `.env.example` to `.env` to customize settings:
+
+```bash
+cp .env.example .env
+```
+
+Then execute the following command in the project root to spin up PostgreSQL, Redis, Apache Kafka, and pgAdmin:
 
 **docker-compose up -d**
 
@@ -66,9 +72,9 @@ A visual database dashboard is included in the Docker stack.
 
 **URL:** http://localhost:5050
 
-**Credentials:** admin@zbank.com / admin
+**Credentials (local demo only, never reuse):** admin@zbank.com / admin
 
-**Connection Host:** postgres-db (Port: 5432, DB: zbank_fraud, User: postgres, Pass: admin)
+**Connection Host:** postgres-db (Port: 5432, DB: zbank_fraud, User: postgres, Pass: admin) *(local demo only, never reuse)*
 
 ## API Documentation
 
