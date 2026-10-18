@@ -58,7 +58,7 @@ cp .env.example .env
 
 Then execute the following command in the project root to spin up PostgreSQL, Redis, Apache Kafka, and pgAdmin:
 
-**docker-compose up -d**
+_docker-compose up -d_
 
 Note: The PostgreSQL container is mapped to host port 5433 to prevent collisions with local database installations.
 
@@ -88,7 +88,7 @@ Evaluates a single transaction against the static rules and the 60-second Redis 
 
 **Request Payload:**
 
-JSON
+_JSON
 {
     "transactionId": "tx_uuid_string",
     "cardId": "card_554433",
@@ -96,29 +96,29 @@ JSON
     "amount": 150.00,
     "currency": "EUR",
     "merchantCategoryCode": "5411"
-}
+}_
 
 **Success Response (200 OK):**
 
-JSON
+_JSON
 {
     "transactionId": "tx_uuid_string",
     "isFraudulent": false,
     "statusReason": "APPROVED"
-}
+}_
 
 **Decline Response (200 OK - Triggers Async Kafka Event):**
 
-JSON
+_JSON
 {
     "transactionId": "tx_uuid_string",
     "isFraudulent": true,
     "statusReason": "DECLINED_VELOCITY_LIMIT_EXCEEDED"
-}
+}_
 
 **Validation Error Response (400 Bad Request):**
 
-JSON
+_JSON
 {
     "status": 400,
     "message": "Validation Failed",
@@ -126,4 +126,4 @@ JSON
         "amount": "Transaction amount must be strictly positive"
     },
     "timestamp": "2026-06-05T12:00:00.000Z"
-}
+}_
