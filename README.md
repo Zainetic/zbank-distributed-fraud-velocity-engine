@@ -147,7 +147,30 @@ Returned when incoming payload fields fail validation:
 
 ## Results
 
-TODO: benchmark numbers (see benchmarks/)
+Benchmark script and reproduction instructions are available in [benchmarks/README.md](benchmarks/README.md).
+
+### Performance Metrics
+
+| Metric | Result | Target Baseline |
+| :--- | :--- | :--- |
+| **Throughput (Requests/sec)** | | > 5,000 req/s |
+| **Latency p50 (ms)** | | < 5 ms |
+| **Latency p95 (ms)** | | < 25 ms |
+| **Latency p99 (ms)** | | < 50 ms |
+| **Average Latency (ms)** | | < 10 ms |
+| **Error Rate (%)** | | < 0.01% |
+
+### Environment Specifications
+
+| Component | Specification |
+| :--- | :--- |
+| **CPU Model** | |
+| **Cores / Threads** | |
+| **System RAM** | |
+| **Operating System** | |
+| **Java Version** | |
+| **Virtual Threads** | Enabled (`spring.threads.virtual.enabled: true`) |
+| **Load Test Profile** | k6 (50 &rarr; 200 &rarr; 500 VUs, 4-minute ramping schedule) |
 
 ## Tests
 
