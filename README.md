@@ -1,5 +1,7 @@
 # ZBank Distributed Real-Time Fraud Detection & Velocity Engine
 
+[![CI](https://github.com/Zainetic/zbank-distributed-fraud-velocity-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Zainetic/zbank-distributed-fraud-velocity-engine/actions/workflows/ci.yml)
+
 A real-time transaction processing and fraud detection service designed to evaluate payment requests against static merchant rules and sliding-window velocity limits. Built with Java 21 and Spring Boot 3.2.5, the system uses Java Virtual Threads for concurrent request handling, Redis pipelining for sliding-window velocity tracking, and Apache Kafka for asynchronous alert publishing and audit persistence.
 
 ## Architecture
@@ -149,19 +151,22 @@ TODO: benchmark numbers (see benchmarks/)
 
 ## Tests
 
-The project includes an integration test suite verifying the sliding-window velocity detection logic:
+The project includes unit and integration test suites covering controller validation, real-time velocity calculation, and Kafka event publishing:
 
-- `VelocityFraudDetectorTest` (`src/test/java/com/zbank/fraud/service/VelocityFraudDetectorTest.java`): Spring Boot integration test suite validating Redis sliding-window operations and limits while mocking relational database and Kafka dependencies:
+- `VelocityFraudDetectorTest` (`src/test/java/com/zbank/fraud/service/VelocityFraudDetectorTest.java`): Spring Boot integration test suite validating Redis sliding-window operations and limits while mocking database and Kafka dependencies:
   - `shouldApproveSingleValidTransaction`: Verifies that an isolated valid transaction is approved.
   - `shouldApproveExactlyThreeTransactionsWithinSixtySeconds`: Verifies boundary handling up to 3 transactions within 60 seconds.
   - `shouldDeclineFourthTransactionWithinSixtySeconds`: Verifies that a 4th transaction within the 60-second window is declined.
   - `shouldApproveFourthTransactionIfOldestTransactionFellOutsideWindow`: Verifies sliding-window pruning (`ZREMRANGEBYSCORE`) when older transactions fall outside the 60-second window.
   - `shouldTrackVelocityIndependentlyForDifferentCards`: Confirms that Redis velocity counters are isolated per card without cross-card contamination.
+- `RedisVelocitySlidingWindowTestcontainersTest` (`src/test/java/com/zbank/fraud/service/RedisVelocitySlidingWindowTestcontainersTest.java`): Testcontainers-based integration test verifying that requests under the limit pass, the next request is declined, and requests pass after the 60-second window expires against an ephemeral Redis container.
+- `FraudCheckControllerValidationTest` (`src/test/java/com/zbank/fraud/controller/FraudCheckControllerValidationTest.java`): MockMvc controller test verifying input validation constraints (returning HTTP 400 Bad Request for negative and zero transaction amounts).
+- `FraudAlertPublishingTest` (`src/test/java/com/zbank/fraud/service/FraudAlertPublishingTest.java`): Tests event-driven alerting verifying that declined transactions publish a `FraudAlertEvent` to the `fraud-alerts` Kafka topic and that `FraudAlertListener` consumes and persists audit records.
 
 ### Running Tests
 
-Ensure Redis is running (e.g., via `docker-compose up -d redis-cache`), then run:
+To run the complete test and verification suite:
 
 ```bash
-mvn test
+mvn verify
 ```
