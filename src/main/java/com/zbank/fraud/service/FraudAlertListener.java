@@ -25,6 +25,13 @@ public class FraudAlertListener {
         log.warn("🚨 ASYNC KAFKA ALERT RECEIVED: Processing decline for Card {} due to: {}", 
                  event.cardId(), event.declineReason());
 
+        // Idempotency check: prevent duplicate audit logs on redelivered events
+        if (auditRepository.existsByTransactionId(event.transactionId())) {
+            log.warn("⚠️ Duplicate alert received for transactionId: {}. Skipping audit persistence (idempotent).", 
+                     event.transactionId());
+            return;
+        }
+
         // Map the event payload to our database entity
         FraudAuditRecord auditLog = new FraudAuditRecord(
                 event.transactionId(),
@@ -34,9 +41,13 @@ public class FraudAlertListener {
                 event.timestamp()
         );
 
-        // Save it to PostgreSQL asynchronously
-        auditRepository.save(auditLog);
-        
-        log.info("💾 Successfully persisted audit log for transaction: {}", event.transactionId());
+        // Save it to PostgreSQL asynchronously with integrity protection
+        try {
+            auditRepository.save(auditLog);
+            log.info("💾 Successfully persisted audit log for transaction: {}", event.transactionId());
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("⚠️ Duplicate audit entry detected via DB constraint for transaction: {}. Handled idempotently.", 
+                     event.transactionId());
+        }
     }
 }

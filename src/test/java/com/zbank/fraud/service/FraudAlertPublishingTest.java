@@ -135,6 +135,8 @@ class FraudAlertPublishingTest {
     @Test
     @DisplayName("FraudAlertListener consumes FraudAlertEvent and persists FraudAuditRecord")
     void shouldPersistAuditRecordWhenEventConsumed() {
+        when(auditRepository.existsByTransactionId("tx_123")).thenReturn(false);
+
         FraudAlertListener listener = new FraudAlertListener(auditRepository);
         FraudAlertEvent event = new FraudAlertEvent(
                 "tx_123",
@@ -155,5 +157,44 @@ class FraudAlertPublishingTest {
         assertEquals(new BigDecimal("99.99"), savedRecord.getAttemptedAmount());
         assertEquals("DECLINED_VELOCITY_LIMIT_EXCEEDED", savedRecord.getDeclineReason());
         assertNotNull(savedRecord.getAlertTimestamp());
+    }
+
+    @Test
+    @DisplayName("FraudAlertListener skips duplicate alerts idempotently without writing to DB")
+    void shouldSkipPersistenceWhenDuplicateAlertConsumed() {
+        when(auditRepository.existsByTransactionId("tx_duplicate")).thenReturn(true);
+
+        FraudAlertListener listener = new FraudAlertListener(auditRepository);
+        FraudAlertEvent duplicateEvent = new FraudAlertEvent(
+                "tx_duplicate",
+                "card_alert",
+                new BigDecimal("99.99"),
+                "DECLINED_VELOCITY_LIMIT_EXCEEDED",
+                Instant.now()
+        );
+
+        listener.consumeFraudAlert(duplicateEvent);
+
+        verify(auditRepository, never()).save(any(FraudAuditRecord.class));
+    }
+
+    @Test
+    @DisplayName("FraudAlertListener catches DataIntegrityViolationException without throwing")
+    void shouldHandleDataIntegrityViolationGracefully() {
+        when(auditRepository.existsByTransactionId("tx_concurrent")).thenReturn(false);
+        when(auditRepository.save(any(FraudAuditRecord.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("Duplicate key violation"));
+
+        FraudAlertListener listener = new FraudAlertListener(auditRepository);
+        FraudAlertEvent event = new FraudAlertEvent(
+                "tx_concurrent",
+                "card_alert",
+                new BigDecimal("50.00"),
+                "DECLINED_VELOCITY_LIMIT_EXCEEDED",
+                Instant.now()
+        );
+
+        assertDoesNotThrow(() -> listener.consumeFraudAlert(event));
+        verify(auditRepository, times(1)).save(any(FraudAuditRecord.class));
     }
 }
