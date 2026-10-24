@@ -40,8 +40,18 @@ class FraudAlertPublishingTest {
     @Mock
     private FraudAuditRepository auditRepository;
 
+    @Mock
+    private FraudMetrics fraudMetrics;
+
     @InjectMocks
     private FraudCheckController fraudCheckController;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        org.mockito.Mockito.lenient()
+                .when(fraudMetrics.recordVelocityCheckTime(any()))
+                .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+    }
 
     @Test
     @DisplayName("Declined transaction due to velocity limit publishes FraudAlertEvent to Kafka")
