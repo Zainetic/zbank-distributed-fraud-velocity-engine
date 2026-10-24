@@ -42,6 +42,15 @@ class FraudCheckControllerValidationTest {
     @MockBean
     private KafkaTemplate<String, Object> kafkaTemplate;
 
+    @MockBean
+    private com.zbank.fraud.service.FraudMetrics fraudMetrics;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        org.mockito.Mockito.when(fraudMetrics.recordVelocityCheckTime(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(0)).get());
+    }
+
     @Test
     @DisplayName("Should return 400 Bad Request when transaction amount is negative")
     void shouldReturn400WhenAmountIsNegative() throws Exception {

@@ -14,9 +14,9 @@ spring:
 
   # PostgreSQL Configuration
   datasource:
-    url: jdbc:postgresql://localhost:5433/zbank_fraud
-    username: postgres
-    password: admin
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${POSTGRES_DB:zbank_fraud}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:admin}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -27,7 +27,7 @@ spring:
       hibernate:
   
   kafka:
-      bootstrap-servers: localhost:9092
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       producer:
         # Automatically convert our Java Records into JSON before sending to Kafka
         value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -37,3 +37,17 @@ spring:
         group-id: zbank-fraud-group
         properties:
           spring.json.trusted.packages: "*"    
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
