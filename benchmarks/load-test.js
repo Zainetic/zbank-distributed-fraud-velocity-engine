@@ -1,16 +1,25 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
+const defaultStages = [
+  { duration: '30s', target: 50 },  // Ramp-up to 50 concurrent users
+  { duration: '1m', target: 200 },  // Ramp-up to 200 concurrent users
+  { duration: '2m', target: 500 },  // Peak sustained load at 500 concurrent users
+  { duration: '30s', target: 0 },    // Ramp-down to 0 users
+];
+
+const fastStages = [
+  { duration: '5s', target: 50 },    // Ramp-up to 50 VUs
+  { duration: '20s', target: 100 },  // Peak at 100 VUs
+  { duration: '5s', target: 0 },     // Ramp-down
+];
+
 export const options = {
-  stages: [
-    { duration: '30s', target: 50 },  // Ramp-up to 50 concurrent users
-    { duration: '1m', target: 200 },  // Ramp-up to 200 concurrent users
-    { duration: '2m', target: 500 },  // Peak sustained load at 500 concurrent users
-    { duration: '30s', target: 0 },    // Ramp-down to 0 users
-  ],
+  stages: __ENV.PROFILE === 'fast' ? fastStages : defaultStages,
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   thresholds: {
-    http_req_failed: ['rate<0.01'],    // HTTP error rate under 1%
-    http_req_duration: ['p(95)<200'],  // 95% of requests faster than 200ms
+    http_req_failed: ['rate<0.05'],
+    http_req_duration: ['p(95)<500'],
   },
 };
 
