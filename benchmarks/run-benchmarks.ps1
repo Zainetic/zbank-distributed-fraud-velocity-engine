@@ -143,7 +143,7 @@ foreach ($sc in $scenarios) {
     $hikariIdle = "0"
     $hikariTimeout = "0"
     try {
-        $promRaw = (Invoke-WebRequest -Uri "http://localhost:8080/actuator/prometheus" -TimeoutSec 3 -ErrorAction SilentlyContinue).Content
+        $promRaw = Invoke-RestMethod -Uri "http://localhost:8080/actuator/prometheus" -TimeoutSec 3 -ErrorAction SilentlyContinue
         if ($promRaw -match 'hikaricp_connections_pending\{[^\}]*\}\s+([\d\.]+)') {
             $hikariPending = $matches[1]
         }
