@@ -14,8 +14,19 @@ const fastStages = [
   { duration: '5s', target: 0 },     // Ramp-down
 ];
 
+const warmupStages = [
+  { duration: '30s', target: 50 },  // 30-second unmeasured warm-up
+];
+
+let selectedStages = defaultStages;
+if (__ENV.PROFILE === 'fast') {
+  selectedStages = fastStages;
+} else if (__ENV.PROFILE === 'warmup') {
+  selectedStages = warmupStages;
+}
+
 export const options = {
-  stages: __ENV.PROFILE === 'fast' ? fastStages : defaultStages,
+  stages: selectedStages,
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   thresholds: {
     http_req_failed: ['rate<0.05'],
