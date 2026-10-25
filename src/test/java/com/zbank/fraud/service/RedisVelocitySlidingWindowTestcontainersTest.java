@@ -26,29 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest
-@Testcontainers(disabledWithoutDocker = true)
-class RedisVelocitySlidingWindowTestcontainersTest {
-
-    @Container
-    static final GenericContainer<?> redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7.2-alpine"))
-            .withExposedPorts(6379);
-
-    static {
-        try {
-            redisContainer.start();
-        } catch (Exception ignored) {
-            // Docker daemon inactive in local environment; test will be skipped by disabledWithoutDocker
-        }
-    }
-
-    @DynamicPropertySource
-    static void configureRedis(DynamicPropertyRegistry registry) {
-        if (redisContainer.isRunning()) {
-            registry.add("spring.data.redis.host", redisContainer::getHost);
-            registry.add("spring.data.redis.port", () -> redisContainer.getMappedPort(6379));
-        }
-    }
+class RedisVelocitySlidingWindowTestcontainersTest extends AbstractRedisIntegrationTest {
 
     @Autowired
     private VelocityFraudDetector velocityFraudDetector;

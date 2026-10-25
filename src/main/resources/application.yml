@@ -51,3 +51,11 @@ management:
       export:
         enabled: true
 
+zbank:
+  redis:
+    velocity:
+      mode: ${ZBANK_REDIS_VELOCITY_MODE:LUA}
+    pipelining:
+      enabled: ${ZBANK_REDIS_PIPELINING_ENABLED:true}
+
+
