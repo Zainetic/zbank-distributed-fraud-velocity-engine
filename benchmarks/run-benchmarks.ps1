@@ -3,7 +3,9 @@
     Reproducible benchmark runner for ZBank Fraud Detection & Velocity Engine.
 .DESCRIPTION
     Automates compiling, spinning up infrastructure, starting the application in each configuration
-    (Virtual Threads ON/OFF x Redis Pipelining ON/OFF), executing the k6 load test, and recording results.
+    (Platform vs Virtual Threads x Pipelined vs Non-Pipelined vs Lua Mode), executing a 30-second
+    unmeasured warm-up, running 3 measured benchmark iterations, collecting Prometheus metrics,
+    and recording results without averaging percentiles.
 .PARAMETER Profile
     Benchmark profile to run: 'fast' (30s per scenario) or 'full' (4m per scenario). Default is 'fast'.
 #>
@@ -17,7 +19,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " ZBank Benchmark Suite (Profile: $Profile)" -ForegroundColor Cyan
+Write-Host " ZBank Benchmark Suite (Profile: $Profile, 3 Runs + 30s Warm-Up)" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
 # 1. Verify infrastructure
@@ -34,7 +36,7 @@ if (-not (Test-Path $jarPath)) {
     throw "Jar file not found at $jarPath"
 }
 
-# Machine specs
+# Machine & Environment specs
 $cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim()
 $cores = (Get-CimInstance Win32_Processor | Select-Object -First 1).NumberOfCores
 $threads = (Get-CimInstance Win32_Processor | Select-Object -First 1).NumberOfLogicalProcessors
@@ -47,21 +49,23 @@ $javaVer = (cmd /c "java -version 2>&1" | Select-Object -First 1).Trim()
 $ErrorActionPreference = $oldEAP
 
 $scenarios = @(
-    @{ Name = "VT ON  + Pipelined (Production)"; VT = "true";  Pipe = "true" },
-    @{ Name = "VT ON  + Non-Pipelined";          VT = "true";  Pipe = "false" },
-    @{ Name = "VT OFF + Pipelined";              VT = "false"; Pipe = "true" },
-    @{ Name = "VT OFF + Non-Pipelined";          VT = "false"; Pipe = "false" }
+    @{ Name = "VT ON  + Lua (Atomic)";      VT = "true";  Mode = "LUA";           Pipe = "true" },
+    @{ Name = "VT ON  + Pipelined";         VT = "true";  Mode = "PIPELINED";     Pipe = "true" },
+    @{ Name = "VT ON  + Non-Pipelined";     VT = "true";  Mode = "NON_PIPELINED"; Pipe = "false" },
+    @{ Name = "VT OFF + Lua (Atomic)";      VT = "false"; Mode = "LUA";           Pipe = "true" },
+    @{ Name = "VT OFF + Pipelined";         VT = "false"; Mode = "PIPELINED";     Pipe = "true" },
+    @{ Name = "VT OFF + Non-Pipelined";     VT = "false"; Mode = "NON_PIPELINED"; Pipe = "false" }
 )
 
 $logDir = Join-Path $PSScriptRoot "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 
-$results = @()
+$scenarioSummaries = @()
 
 foreach ($sc in $scenarios) {
     Write-Host "`n-----------------------------------------------------------------" -ForegroundColor Magenta
     Write-Host " Running Scenario: $($sc.Name)" -ForegroundColor Magenta
-    Write-Host " Virtual Threads: $($sc.VT) | Redis Pipelining: $($sc.Pipe)" -ForegroundColor Magenta
+    Write-Host " Virtual Threads: $($sc.VT) | Velocity Mode: $($sc.Mode) | Pipelining: $($sc.Pipe)" -ForegroundColor Magenta
     Write-Host "-----------------------------------------------------------------" -ForegroundColor Magenta
 
     # Ensure clean Redis state
@@ -69,12 +73,12 @@ foreach ($sc in $scenarios) {
     Start-Sleep -Seconds 1
 
     # Start application with lightweight heap and logs redirected to disk
-    $appLogOut = Join-Path $logDir "app-$($sc.VT)-$($sc.Pipe).out.log"
-    $appLogErr = Join-Path $logDir "app-$($sc.VT)-$($sc.Pipe).err.log"
+    $appLogOut = Join-Path $logDir "app-$($sc.VT)-$($sc.Mode).out.log"
+    $appLogErr = Join-Path $logDir "app-$($sc.VT)-$($sc.Mode).err.log"
     if (Test-Path $appLogOut) { Remove-Item -Path $appLogOut -Force }
     if (Test-Path $appLogErr) { Remove-Item -Path $appLogErr -Force }
 
-    $jvmArgs = "-Xms64m -Xmx384m -Xss512k -Dspring.threads.virtual.enabled=$($sc.VT) -Dzbank.redis.pipelining.enabled=$($sc.Pipe) -Dspring.jpa.show-sql=false -Dlogging.level.root=WARN -Dlogging.level.com.zbank=INFO"
+    $jvmArgs = "-Xms64m -Xmx384m -Xss512k -Dspring.threads.virtual.enabled=$($sc.VT) -Dzbank.redis.velocity.mode=$($sc.Mode) -Dzbank.redis.pipelining.enabled=$($sc.Pipe) -Dspring.jpa.show-sql=false -Dlogging.level.root=WARN -Dlogging.level.com.zbank=INFO"
     $appProc = Start-Process -FilePath "java" -ArgumentList "$jvmArgs -jar `"$jarPath`"" -RedirectStandardOutput $appLogOut -RedirectStandardError $appLogErr -PassThru
 
     # Poll health
@@ -100,88 +104,121 @@ foreach ($sc in $scenarios) {
     }
     Write-Host "Application is HEALTHY (UP)." -ForegroundColor Green
 
-    # Warm-up (10 requests) to warm JIT and connection pools
-    $warmupPayload = '{"transactionId":"00000000-0000-0000-0000-000000000001","cardId":"card_warmup","accountId":"acc_warmup","amount":10.0,"currency":"USD","merchantCategoryCode":"5411"}'
-    for ($w = 0; $w -lt 10; $w++) {
-        try {
-            Invoke-RestMethod -Uri "http://localhost:8080/api/v1/fraud/velocity-check" -Method Post -Body $warmupPayload -ContentType "application/json" -TimeoutSec 2 | Out-Null
-        } catch {}
+    # --- 30-Second Unmeasured Warm-Up ---
+    Write-Host "Executing 30-second unmeasured warm-up..." -ForegroundColor Yellow
+    $k6Raw = Get-Content (Join-Path $PSScriptRoot "load-test.js") -Raw
+    $k6Raw | docker run --rm -i -e "BASE_URL=http://host.docker.internal:8080" -e "PROFILE=warmup" grafana/k6 run - 2>&1 | Out-Null
+    Write-Host "30-second warm-up completed. Starting 3 measured benchmark runs..." -ForegroundColor Green
+
+    $runs = @()
+    for ($r = 1; $r -le 3; $r++) {
+        Write-Host "  [Run $r of 3] Executing k6 benchmark..." -ForegroundColor Yellow
+        $k6Output = $k6Raw | docker run --rm -i -e "BASE_URL=http://host.docker.internal:8080" -e "PROFILE=$Profile" grafana/k6 run - 2>&1 | Out-String
+
+        $rps = 0.0; $avg = "-"; $p50 = "-"; $p95 = "-"; $p99 = "-"; $failedRate = "0.00%"
+        if ($k6Output -match 'http_reqs\.*:\s+\d+\s+([\d\.]+)/s') { $rps = [double]$matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*avg=([^\s]+)') { $avg = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*med=([^\s]+)') { $p50 = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*p\(95\)=([^\s]+)') { $p95 = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*p\(99\)=([^\s]+)') { $p99 = $matches[1] }
+        if ($k6Output -match 'http_req_failed\.*:\s+([\d\.]+)%') { $failedRate = "$($matches[1])%" }
+
+        Write-Host "    -> Run ${r}: RPS=$rps, p50=$p50, p95=$p95, p99=$p99, Failed=$failedRate" -ForegroundColor Cyan
+
+        $runs += [PSCustomObject]@{
+            RunNumber = $r
+            RPS       = $rps
+            p50       = $p50
+            p95       = $p95
+            p99       = $p99
+            Avg       = $avg
+            ErrorRate = $failedRate
+        }
+        Start-Sleep -Seconds 2
     }
 
-    # Run k6 via Docker
-    Write-Host "Executing k6 benchmark..." -ForegroundColor Yellow
-    $k6Raw = Get-Content (Join-Path $PSScriptRoot "load-test.js") -Raw
-    $k6Output = $k6Raw | docker run --rm -i -e "BASE_URL=http://host.docker.internal:8080" -e "PROFILE=$Profile" grafana/k6 run - 2>&1 | Out-String
+    # Collect Prometheus Metrics for diagnostic analysis
+    $hikariPending = "0"
+    $hikariActive = "0"
+    $hikariIdle = "0"
+    $hikariTimeout = "0"
+    try {
+        $promRaw = Invoke-RestMethod -Uri "http://localhost:8080/actuator/prometheus" -TimeoutSec 3 -ErrorAction SilentlyContinue
+        if ($promRaw -match 'hikaricp_connections_pending\{[^\}]*\}\s+([\d\.]+)') {
+            $hikariPending = $matches[1]
+        }
+        if ($promRaw -match 'hikaricp_connections_active\{[^\}]*\}\s+([\d\.]+)') {
+            $hikariActive = $matches[1]
+        }
+        if ($promRaw -match 'hikaricp_connections_idle\{[^\}]*\}\s+([\d\.]+)') {
+            $hikariIdle = $matches[1]
+        }
+        if ($promRaw -match 'hikaricp_connections_timeout_total\{[^\}]*\}\s+([\d\.]+)') {
+            $hikariTimeout = $matches[1]
+        }
+    } catch {}
 
     # Terminate application process
     Write-Host "Stopping application..."
     Stop-Process -Id $appProc.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
 
-    # Parse metrics from k6 output
-    $rps = 0
-    if ($k6Output -match 'http_reqs\.*:\s+\d+\s+([\d\.]+)/s') {
-        $rps = [double]$matches[1]
-    }
+    # Calculate median & min-max throughput
+    $sortedRps = ($runs | ForEach-Object { $_.RPS }) | Sort-Object
+    $minRps = $sortedRps[0]
+    $medianRps = $sortedRps[1]
+    $maxRps = $sortedRps[2]
 
-    $avg = "-"; $p50 = "-"; $p95 = "-"; $p99 = "-"
-    if ($k6Output -match 'avg=([\d\.]+m?s)') {
-        $avg = $matches[1]
-    }
-    if ($k6Output -match 'med=([\d\.]+m?s)') {
-        $p50 = $matches[1]
-    }
-    if ($k6Output -match 'p\(95\)=([\d\.]+m?s)') {
-        $p95 = $matches[1]
-    }
-    if ($k6Output -match 'p\(99\)=([\d\.]+m?s)') {
-        $p99 = $matches[1]
-    }
-
-    $failedRate = "0%"
-    if ($k6Output -match 'http_req_failed\.*:\s+([\d\.]+)%') {
-        $failedRate = "$($matches[1])%"
-    }
-
-    Write-Host "Finished: RPS=$rps, p50=$p50, p95=$p95, p99=$p99, Failed=$failedRate" -ForegroundColor Cyan
-
-    $results += [PSCustomObject]@{
-        Scenario     = $sc.Name
-        VirtualThreads = $sc.VT
-        Pipelining   = $sc.Pipe
-        RPS          = $rps
-        p50          = $p50
-        p95          = $p95
-        p99          = $p99
-        Avg          = $avg
-        ErrorRate    = $failedRate
+    $scenarioSummaries += [PSCustomObject]@{
+        Scenario        = $sc.Name
+        VirtualThreads  = $sc.VT
+        Mode            = $sc.Mode
+        Pipelining      = $sc.Pipe
+        MedianRPS       = $medianRps
+        MinRPS          = $minRps
+        MaxRPS          = $maxRps
+        Runs            = $runs
+        HikariPending   = $hikariPending
+        HikariActive    = $hikariActive
+        HikariIdle      = $hikariIdle
+        HikariTimeouts  = $hikariTimeout
     }
 }
 
 # Display summary table
 Write-Host "`n=================================================================" -ForegroundColor Green
-Write-Host " BENCHMARK RESULTS SUMMARY" -ForegroundColor Green
+Write-Host " BENCHMARK RESULTS SUMMARY (3 RUNS PER SCENARIO)" -ForegroundColor Green
 Write-Host "=================================================================" -ForegroundColor Green
-$results | Format-Table -AutoSize | Out-String | Write-Host
+
+foreach ($summary in $scenarioSummaries) {
+    Write-Host "`nScenario: $($summary.Scenario) (Median RPS: $($summary.MedianRPS) [Range: $($summary.MinRPS) - $($summary.MaxRPS)])" -ForegroundColor Yellow
+    $summary.Runs | Format-Table -Property RunNumber, RPS, p50, p95, p99, Avg, ErrorRate -AutoSize | Out-String | Write-Host
+    Write-Host "  -> Diagnostics: Hikari Pending=$($summary.HikariPending), Active=$($summary.HikariActive), Idle=$($summary.HikariIdle), Timeouts=$($summary.HikariTimeouts)" -ForegroundColor Gray
+}
 
 # Write results to benchmarks/RESULTS.md
 $resultsMd = @"
 # ZBank Benchmark Evaluation Results
 
 **Execution Date:** $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")  
-**Load Profile:** $Profile  
+**Load Profile:** $Profile (100 concurrent VUs)  
+**Warm-Up:** 30-second unmeasured warm-up prior to measurement  
+**Iterations:** 3 runs per scenario (reporting individual run percentiles and median throughput)  
 **Tool:** k6 v2.3.0 (Grafana Docker)  
 
 ---
 
 ## 1. Comparative Matrix
 
-| Configuration Scenario | Throughput (req/s) | Latency p50 | Latency p95 | Latency p99 | Avg Latency | Error Rate |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Configuration Scenario | Median Throughput | Throughput Range (Min - Max) | Run 1 (p50 / p95 / p99 / Error) | Run 2 (p50 / p95 / p99 / Error) | Run 3 (p50 / p95 / p99 / Error) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
 "@
 
-foreach ($r in $results) {
-    $resultsMd += "`n| **$($r.Scenario)** | $($r.RPS) req/s | $($r.p50) | $($r.p95) | $($r.p99) | $($r.Avg) | $($r.ErrorRate) |"
+foreach ($s in $scenarioSummaries) {
+    $r1 = "$($s.Runs[0].p50) / $($s.Runs[0].p95) / $($s.Runs[0].p99) / $($s.Runs[0].ErrorRate)"
+    $r2 = "$($s.Runs[1].p50) / $($s.Runs[1].p95) / $($s.Runs[1].p99) / $($s.Runs[1].ErrorRate)"
+    $r3 = "$($s.Runs[2].p50) / $($s.Runs[2].p95) / $($s.Runs[2].p99) / $($s.Runs[2].ErrorRate)"
+    $resultsMd += "`n| **$($s.Scenario)** | **$($s.MedianRPS) req/s** | $($s.MinRPS) - $($s.MaxRPS) req/s | $r1 | $r2 | $r3 |"
 }
 
 $resultsMd += @"
@@ -189,27 +226,33 @@ $resultsMd += @"
 
 ---
 
-## 2. Technical Findings & Analysis
+## 2. Technical Findings & Virtual Threads Investigation
 
-1. **Redis Pipelining Impact:**
-   - Batched pipelining combines ``ZADD``, ``ZREMRANGEBYSCORE``, ``ZCARD``, and ``EXPIRE`` into a single TCP packet.
-   - Without pipelining, each transaction incurs 4 sequential network round-trips to Redis, noticeably increasing latency percentiles.
+1. **Redis Execution Modes Comparison:**
+   - **Atomic Lua Script (`LUA`):** Eliminates both the race condition (Bug a) and set poisoning (Bug b) with a single server-side script execution.
+   - **Pipelined (`PIPELINED`):** Batches multiple commands in one round-trip but suffers from race condition under concurrency.
+   - **Non-Pipelined (`NON_PIPELINED`):** Four discrete sequential round-trips to Redis.
 
-2. **Virtual Threads (Project Loom) Impact:**
-   - Virtual threads allow high-concurrency request execution without thread-pool contention, providing stable p99 latencies under heavy load.
+2. **Virtual Threads Diagnostic Findings:**
+   - Database connection pool contention (HikariCP default: 10 connections) acts as a primary bottleneck under concurrent load.
+   - When requests flood the service with 100 concurrent virtual threads, all 100 threads contend for the 10 Hikari connections during the PostgreSQL merchant-blacklist check (`existsByMerchantCategoryCode`).
+   - Hikari pending connection counter (`hikaricp_connections_pending`) reflects virtual threads queued waiting for a free JDBC connection.
 
 ---
 
 ## 3. Environment & Hardware Specifications
 
-| Component | Measured Specification |
+| Component | Measured System Specification |
 | :--- | :--- |
 | **CPU Model** | $cpu |
 | **Cores / Threads** | $cores Cores / $threads Logical Processors |
 | **System RAM** | $ramGb GB |
 | **Operating System** | $os |
 | **Java Runtime** | $javaVer |
-| **Load Profile** | k6 ($Profile profile) targeting ``/api/v1/fraud/velocity-check`` |
+| **JVM Flags** | `-Xms64m -Xmx384m -Xss512k -Dspring.jpa.show-sql=false -Dlogging.level.root=WARN` |
+| **HikariCP Pool Size** | `maximumPoolSize: 10` (HikariCP default) |
+| **Redis Connection Setup** | Lettuce driver, single shared multiplexed non-blocking connection |
+| **Machine Locality** | Load generator (k6) and application share the same machine, CPU cores, and memory |
 
 ---
 *Results generated automatically by `benchmarks/run-benchmarks.ps1`.*
