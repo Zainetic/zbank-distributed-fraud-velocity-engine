@@ -30,6 +30,11 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    kafka:
+      enabled: false
+    redis:
+      enabled: false
   prometheus:
     metrics:
       export:
