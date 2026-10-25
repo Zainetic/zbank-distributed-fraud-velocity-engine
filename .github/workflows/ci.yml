@@ -44,12 +44,18 @@ jobs:
             if [ -d target/surefire-reports ]; then
               echo "### ❌ Surefire Test Failures" >> $GITHUB_STEP_SUMMARY
               for f in target/surefire-reports/*.txt; do
+                fname=$(basename "$f")
                 echo "================ $f ================"
                 cat "$f"
-                echo "#### $(basename "$f")" >> $GITHUB_STEP_SUMMARY
+                echo "#### $fname" >> $GITHUB_STEP_SUMMARY
                 echo '```' >> $GITHUB_STEP_SUMMARY
                 cat "$f" >> $GITHUB_STEP_SUMMARY
                 echo '```' >> $GITHUB_STEP_SUMMARY
+                while IFS= read -r line; do
+                  if [[ "$line" =~ (FAILURE|ERROR|Exception|Error|Failed) ]]; then
+                    echo "::error title=$fname::$line"
+                  fi
+                done < "$f"
               done
             fi
             exit 1
