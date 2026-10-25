@@ -136,7 +136,7 @@ foreach ($sc in $scenarios) {
             $failedRate = "$($matches[1])%"
         }
 
-        Write-Host "    -> Run $r: RPS=$rps, p50=$p50, p95=$p95, p99=$p99, Failed=$failedRate" -ForegroundColor Cyan
+        Write-Host "    -> Run ${r}: RPS=$rps, p50=$p50, p95=$p95, p99=$p99, Failed=$failedRate" -ForegroundColor Cyan
 
         $runs += [PSCustomObject]@{
             RunNumber = $r
