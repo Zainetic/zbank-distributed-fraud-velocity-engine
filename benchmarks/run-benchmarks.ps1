@@ -115,26 +115,13 @@ foreach ($sc in $scenarios) {
         Write-Host "  [Run $r of 3] Executing k6 benchmark..." -ForegroundColor Yellow
         $k6Output = $k6Raw | docker run --rm -i -e "BASE_URL=http://host.docker.internal:8080" -e "PROFILE=$Profile" grafana/k6 run - 2>&1 | Out-String
 
-        $rps = 0.0
-        $reqsLine = ($k6Output -split "`r?`n" | Where-Object { $_ -match 'http_reqs\.*:' })[0]
-        if ($reqsLine -match '([\d\.]+)/s') {
-            $rps = [double]$matches[1]
-        }
-
-        $avg = "-"; $p50 = "-"; $p95 = "-"; $p99 = "-"
-        $durationLine = ($k6Output -split "`r?`n" | Where-Object { $_ -match 'http_req_duration' })[0]
-        if ($durationLine) {
-            if ($durationLine -match 'avg=([^\s]+)') { $avg = $matches[1] }
-            if ($durationLine -match 'med=([^\s]+)') { $p50 = $matches[1] }
-            if ($durationLine -match 'p\(95\)=([^\s]+)') { $p95 = $matches[1] }
-            if ($durationLine -match 'p\(99\)=([^\s]+)') { $p99 = $matches[1] }
-        }
-
-        $failedRate = "0.00%"
-        $failedLine = ($k6Output -split "`r?`n" | Where-Object { $_ -match 'http_req_failed\.*:' })[0]
-        if ($failedLine -match '([\d\.]+)%') {
-            $failedRate = "$($matches[1])%"
-        }
+        $rps = 0.0; $avg = "-"; $p50 = "-"; $p95 = "-"; $p99 = "-"; $failedRate = "0.00%"
+        if ($k6Output -match 'http_reqs\.*:\s+\d+\s+([\d\.]+)/s') { $rps = [double]$matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*avg=([^\s]+)') { $avg = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*med=([^\s]+)') { $p50 = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*p\(95\)=([^\s]+)') { $p95 = $matches[1] }
+        if ($k6Output -match 'http_req_duration\.*:[^\r\n]*p\(99\)=([^\s]+)') { $p99 = $matches[1] }
+        if ($k6Output -match 'http_req_failed\.*:\s+([\d\.]+)%') { $failedRate = "$($matches[1])%" }
 
         Write-Host "    -> Run ${r}: RPS=$rps, p50=$p50, p95=$p95, p99=$p99, Failed=$failedRate" -ForegroundColor Cyan
 
