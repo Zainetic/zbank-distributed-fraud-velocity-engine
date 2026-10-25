@@ -113,6 +113,24 @@ class VelocityFraudDetectorTest {
         assertFalse(velocityFraudDetector.isFraudulentVelocity(cardBReq), "Card B should be approved independently of Card A");
     }
 
+    @Test
+    void shouldEnforceVelocityLimitEquallyInNonPipelinedMode() {
+        String testCardNonPipelined = "card_non_pipelined_99";
+        try {
+            velocityFraudDetector.setPipeliningEnabled(false);
+            Instant now = Instant.now();
+
+            assertFalse(velocityFraudDetector.isFraudulentVelocity(createRequest(testCardNonPipelined, now)));
+            assertFalse(velocityFraudDetector.isFraudulentVelocity(createRequest(testCardNonPipelined, now.plusSeconds(1))));
+            assertFalse(velocityFraudDetector.isFraudulentVelocity(createRequest(testCardNonPipelined, now.plusSeconds(2))));
+            assertTrue(velocityFraudDetector.isFraudulentVelocity(createRequest(testCardNonPipelined, now.plusSeconds(3))),
+                    "4th transaction in non-pipelined mode must also be declined");
+        } finally {
+            velocityFraudDetector.setPipeliningEnabled(true);
+            redisTemplate.delete("velocity:card:" + testCardNonPipelined);
+        }
+    }
+
     // Helper method to keep test code clean and readable
     private TransactionRequest createRequest(String cardId, Instant timestamp) {
         return new TransactionRequest(

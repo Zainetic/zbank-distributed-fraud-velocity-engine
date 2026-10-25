@@ -13,3 +13,8 @@ target/
 
 # Environment variables and secrets
 .env
+
+# Benchmark logs and JVM error reports
+benchmarks/logs/
+hs_err_pid*.log
+replay_pid*.log

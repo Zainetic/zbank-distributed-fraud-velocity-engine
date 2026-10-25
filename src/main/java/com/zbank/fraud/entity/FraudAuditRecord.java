@@ -13,6 +13,7 @@ public class FraudAuditRecord {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Column(name = "transaction_id", nullable = false, unique = true)
     private String transactionId;
     private String cardId;
     private BigDecimal attemptedAmount;

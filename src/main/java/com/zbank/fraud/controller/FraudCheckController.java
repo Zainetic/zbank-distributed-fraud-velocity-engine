@@ -3,6 +3,7 @@ package com.zbank.fraud.controller;
 import com.zbank.fraud.event.FraudAlertEvent;
 import com.zbank.fraud.model.TransactionRequest;
 import com.zbank.fraud.repository.BlacklistedMerchantRepository;
+import com.zbank.fraud.service.FraudMetrics;
 import com.zbank.fraud.service.VelocityFraudDetector;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -18,14 +19,16 @@ public class FraudCheckController {
     private final VelocityFraudDetector velocityFraudDetector;
     private final BlacklistedMerchantRepository merchantRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final FraudMetrics fraudMetrics;
 
-    // Inject KafkaTemplate into the constructor
     public FraudCheckController(VelocityFraudDetector velocityFraudDetector,
                                 BlacklistedMerchantRepository merchantRepository,
-                                KafkaTemplate<String, Object> kafkaTemplate) {
+                                KafkaTemplate<String, Object> kafkaTemplate,
+                                FraudMetrics fraudMetrics) {
         this.velocityFraudDetector = velocityFraudDetector;
         this.merchantRepository = merchantRepository;
         this.kafkaTemplate = kafkaTemplate;
+        this.fraudMetrics = fraudMetrics;
     }
 
     @PostMapping("/velocity-check")
@@ -44,20 +47,26 @@ public class FraudCheckController {
 
         // 1. PostgreSQL Check
         if (merchantRepository.existsByMerchantCategoryCode(processedRequest.merchantCategoryCode())) {
+            fraudMetrics.recordDecision("DECLINED", "BLACKLISTED_MERCHANT");
             publishFraudAlert(processedRequest, "DECLINED_BLACKLISTED_MERCHANT");
             return ResponseEntity.ok(new FraudCheckResponse(processedRequest.transactionId(), true, "DECLINED_BLACKLISTED_MERCHANT"));
         }
 
-        // 2. Redis Check
-        if (velocityFraudDetector.isFraudulentVelocity(processedRequest)) {
+        // 2. Redis Check (latency timed)
+        boolean isVelocityFraud = fraudMetrics.recordVelocityCheckTime(() ->
+                velocityFraudDetector.isFraudulentVelocity(processedRequest));
+
+        if (isVelocityFraud) {
+            fraudMetrics.recordDecision("DECLINED", "VELOCITY_LIMIT_EXCEEDED");
             publishFraudAlert(processedRequest, "DECLINED_VELOCITY_LIMIT_EXCEEDED");
             return ResponseEntity.ok(new FraudCheckResponse(processedRequest.transactionId(), true, "DECLINED_VELOCITY_LIMIT_EXCEEDED"));
         }
 
+        fraudMetrics.recordDecision("APPROVED", "NONE");
         return ResponseEntity.ok(new FraudCheckResponse(processedRequest.transactionId(), false, "APPROVED"));
     }
 
-    // Helper method to publish the event asynchronously 
+    // Helper method to publish the event asynchronously with failure tracking
     private void publishFraudAlert(TransactionRequest request, String reason) {
         FraudAlertEvent event = new FraudAlertEvent(
                 request.transactionId(),
@@ -66,8 +75,14 @@ public class FraudCheckController {
                 reason,
                 Instant.now()
         );
-        // Fire and forget: send to the "fraud-alerts" topic
-        kafkaTemplate.send("fraud-alerts", event);
+        var future = kafkaTemplate.send("fraud-alerts", event);
+        if (future != null) {
+            future.whenComplete((result, ex) -> {
+                if (ex != null) {
+                    fraudMetrics.incrementKafkaPublishFailures();
+                }
+            });
+        }
     }
 
     public record FraudCheckResponse(String transactionId, boolean isFraudulent, String statusReason) {}
